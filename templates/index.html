@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Gesture Recognition</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .webcam-container {
+            position: relative;
+            margin: 20px 0;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        #webcam {
+            display: block;
+            width: 100%;
+            max-width: 640px;
+        }
+        
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .result-container {
+            width: 100%;
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        
+        .result-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .result-gesture {
+            font-size: 36px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+            color: #333;
+        }
+        
+        .confidence-bar-container {
+            width: 100%;
+            background-color: #e0e0e0;
+            height: 24px;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .confidence-bar {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            border-radius: 12px;
+            transition: width 0.3s ease;
+        }
+        
+        .confidence-text {
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f8ff;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+        }
+        
+        .error-message {
+            color: #d32f2f;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #ffebee;
+            border-radius: 4px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Hand Gesture Recognition</h1>
+    
+    <div class="container">
+        <div class="controls">
+            <button id="startButton">Start Camera</button>
+            <button id="stopButton" disabled>Stop Camera</button>
+        </div>
+        
+        <div class="webcam-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="overlay"></canvas>
+        </div>
+        
+        <div class="result-container">
+            <div class="result-title">Recognition Result:</div>
+            <div class="result-gesture" id="gesture">No gesture detected</div>
+            
+            <div class="confidence-bar-container">
+                <div class="confidence-bar" id="confidenceBar"></div>
+            </div>
+            <div class="confidence-text" id="confidenceText">Confidence: 0%</div>
+        </div>
+        
+        <div class="error-message" id="errorMessage"></div>
+        
+        <div class="instructions">
+            <h3>Instructions:</h3>
+            <ol>
+                <li>Click "Start Camera" to enable your webcam</li>
+                <li>Position your hand in the green box</li>
+                <li>Make a gesture representing a number (0-9)</li>
+                <li>The system will recognize your gesture in real-time</li>
+            </ol>
+        </div>
+    </div>
+    
+    <script>
+        // Elements
+        const webcamElement = document.getElementById('webcam');
+        const overlayElement = document.getElementById('overlay');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const gestureElement = document.getElementById('gesture');
+        const confidenceBar = document.getElementById('confidenceBar');
+        const confidenceText = document.getElementById('confidenceText');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        // Variables
+        let stream = null;
+        let isRunning = false;
+        let animationId = null;
+        let roiRect = {
+            x: 0,
+            y: 0,
+            size: 0
+        };
+        
+        // Canvas context
+        const overlayCtx = overlayElement.getContext('2d');
+        
+        // Function to start webcam
+        async function startWebcam() {
+            try {
+                // Reset error message
+                errorMessage.style.display = 'none';
+                
+                // Get webcam stream
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+                
+                // Set video source
+                webcamElement.srcObject = stream;
+                
+                // Update UI
+                startButton.disabled = true;
+                stopButton.disabled = false;
+                isRunning = true;
+                
+                // Wait for video to be ready
+                webcamElement.onloadedmetadata = () => {
+                    // Set canvas size to match video
+                    overlayElement.width = webcamElement.videoWidth;
+                    overlayElement.height = webcamElement.videoHeight;
+                    
+                    // Start prediction loop
+                    startPredictionLoop();
+                };
+            } catch (err) {
+                console.error('Error accessing webcam:', err);
+                showError(`Error accessing webcam: ${err.message}`);
+            }
+        }
+        
+        // Function to stop webcam
+        function stopWebcam() {
+            if (stream) {
+                // Stop all tracks
+                stream.getTracks().forEach(track => track.stop());
+                webcamElement.srcObject = null;
+                
+                // Cancel animation
+                if (animationId) {
+                    cancelAnimationFrame(animationId);
+                    animationId = null;
+                }
+                
+                // Update UI
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                isRunning = false;
+                
+                // Reset results
+                gestureElement.textContent = 'No gesture detected';
+                confidenceBar.style.width = '0%';
+                confidenceText.textContent = 'Confidence: 0%';
+                
+                // Clear overlay
+                overlayCtx.clearRect(0, 0, overlayElement.width, overlayElement.height);
+            }
+        }
+        
+        // Function to capture current frame and send for prediction
+        function captureAndPredict() {
+            if (!isRunning) return;
+            
+            try {
+                // Create a temporary canvas to capture the frame
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = webcamElement.videoWidth;
+                tempCanvas.height = webcamElement.videoHeight;
+                
+                // Draw the current video frame on the canvas (mirror horizontally)
+                const ctx = tempCanvas.getContext('2d');
+                ctx.translate(tempCanvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(webcamElement, 0, 0, tempCanvas.width, tempCanvas.height);
+                
+                // Convert canvas to base64 image
+                const imageData = tempCanvas.toDataURL('image/jpeg', 0.8);
+                
+                // Send to server for prediction
+                fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ image: imageData })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+                    
+                    // Draw ROI rectangle
+                    if (data.roi) {
+                        roiRect = data.roi;
+                        drawROI();
+                    }
+                    
+                    // Update results if confidence is high enough
+                    if (data.confidence > 0.7) {
+                        gestureElement.textContent = data.gesture;
+                        confidenceBar.style.width = `${data.confidence * 100}%`;
+                        confidenceText.textContent = `Confidence: ${(data.confidence * 100).toFixed(1)}%`;
+                    }
+                })
+                .catch(err => {
+                    console.error('Error sending prediction request:', err);
+                });
+                
+            } catch (err) {
+                console.error('Error capturing frame:', err);
+            }
+            
+            // Schedule next prediction
+            animationId = requestAnimationFrame(captureAndPredict);
+        }
+        
+        // Function to start prediction loop
+        function startPredictionLoop() {
+            // Set initial ROI in the center
+            const width = webcamElement.videoWidth;
+            const height = webcamElement.videoHeight;
+            const size = Math.min(width, height) * 0.7;
+            
+            roiRect = {
+                x: (width - size) / 2,
+                y: (height - size) / 2,
+                size: size
+            };
+            
+            // Draw initial ROI
+            drawROI();
+            
+            // Start prediction loop
+            captureAndPredict();
+        }
+        
+        // Function to draw ROI on overlay
+        function drawROI() {
+            // Clear overlay
+            overlayCtx.clearRect(0, 0, overlayElement.width, overlayElement.height);
+            
+            // Draw mirrored ROI rectangle
+            overlayCtx.strokeStyle = '#4CAF50';
+            overlayCtx.lineWidth = 3;
+            
+            // Mirror the x-coordinate
+            const mirroredX = overlayElement.width - roiRect.x - roiRect.size;
+            
+            overlayCtx.strokeRect(
+                mirroredX,
+                roiRect.y,
+                roiRect.size,
+                roiRect.size
+            );
+        }
+        
+        // Function to show error message
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+        
+        // Event listeners
+        startButton.addEventListener('click', startWebcam);
+        stopButton.addEventListener('click', stopWebcam);
+    </script>
+</body>
+</html>
